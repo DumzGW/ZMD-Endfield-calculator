@@ -1,0 +1,2 @@
+# Endfield-production-line-calculator-CN
+明日方舟终末地基建产线计算器，根据产线数量自行计算所需材料入口通道数，并可在限制下计算出各地区最高出售价格的规划方案
