@@ -11,10 +11,8 @@ import sys, os
 def resource_path(relative_path):
     return os.path.join(BASE_DIR, relative_path)
 def get_base_dir():
-    # 打包后
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
-    # 开发时
     return os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = get_base_dir()
 
@@ -64,9 +62,7 @@ limit_df = pd.read_excel(resource_path("factory_db.xlsx"), sheet_name="Limit")
 limit_items = {}
 limit_areas = ["无限制"]  # 默认选项
 
-# 获取地区列表（从B2开始）
 if not limit_df.empty and len(limit_df.columns) > 1:
-    # 跳过第一列，从第二列开始获取地区名
     for col in limit_df.columns[1:]:
         area = str(col).strip()
         if area and area != "nan" and area != "Unnamed: 0":
@@ -265,38 +261,25 @@ def update_limit_display():
                     else:
                         new_value = Fraction(0)
                     
-                    # 转换为float用于检查
                     float_value = float(new_value)
                     
-                    # 检查第二位小数是否非0
-                    # 计算到小数点后两位的值
                     value_rounded = round(float_value, 2)
                     
-                    # 提取第二位小数
                     second_decimal = int(value_rounded * 100) % 10
                     
-                    # 如果第二位小数非0且原值不是整数（避免2.0的情况）
                     if second_decimal != 0 and abs(value_rounded - round(float_value)) > 0.0001:
-                        # 加上0.01
                         float_value += 0.01
-                        # 更新Fraction值
                         new_value = Fraction(float_value).limit_denominator(1000)
                     
-                    # 获取项目类型
                     item_type = limit_entries[item]["type"]
                     
-                    # 计算当前消耗
                     current_consumption = get_current_consumption(item)
                     
-                    # 将调整后的值显示为两位小数
                     entry_widget.delete(0, tk.END)
                     entry_widget.insert(0, f"{float_value:.2f}")
                     
-                    # 对于设备，需要特殊处理：比较使用率与限制
                     if item_type == "设备":
-                        # 对于设备，current_consumption是使用率
                         if current_consumption > new_value:
-                            # 弹出警告
                             old_value = last_limit_values.get(item, Fraction(0))
                             entry_widget.delete(0, tk.END)
                             entry_widget.insert(0, f"{float(old_value):.2f}")
@@ -305,16 +288,12 @@ def update_limit_display():
                                 f"警告：当前{item}的使用率为{float(current_consumption):.2f}，大于您输入的限制值{float(new_value):.2f}。\n限制值已恢复为{float(old_value):.2f}。"
                             )
                         else:
-                            # 更新上一次的值
                             last_limit_values[item] = new_value
-                            # 重置调整状态
                             reset_adjustment_state()
                     else:
-                        # 对于材料，使用原有逻辑
                         old_value = last_limit_values.get(item, Fraction(0))
                         
                         if new_value < current_consumption:
-                            # 弹出警告并恢复原值
                             entry_widget.delete(0, tk.END)
                             entry_widget.insert(0, f"{float(old_value):.2f}")
                             tk.messagebox.showwarning(
@@ -322,19 +301,15 @@ def update_limit_display():
                                 f"警告：当前{item}的消耗为{float(current_consumption):.2f}，大于您输入的限制值{float(new_value):.2f}。\n限制值已恢复为{float(old_value):.2f}。"
                             )
                         else:
-                            # 更新上一次的值
                             last_limit_values[item] = new_value
-                            # 重置调整状态
                             reset_adjustment_state()
                 except ValueError:
-                    # 如果输入的不是数字，恢复原值
                     entry_widget.delete(0, tk.END)
                     old_val = last_limit_values.get(item, Fraction(0))
                     entry_widget.insert(0, f"{float(old_val):.2f}")
         limit_entry.bind("<FocusIn>", on_limit_focus_in)
         limit_entry.bind("<FocusOut>", on_limit_focus_out)
         
-        # 存储引用
         limit_entries[item_name] = {
             "entry": limit_entry,
             "var": limit_var,
@@ -347,13 +322,9 @@ def update_limit_display():
         tk.Label(limit_scrollable_frame, text="该地区无限制项目", 
                 font=("微软雅黑", 10), bg="#e8f4f8", fg="gray", pady=20).pack()
     
-    # 更新计算结果
     refresh()
 
-# 绑定地区选择事件
 area_combo.bind("<<ComboboxSelected>>", lambda e: update_limit_display())
-
-# 初始化限制显示
 
 
 # ===== 产品输入面板 =====
@@ -790,19 +761,16 @@ def show_optimization_result(optimized_quantities, price_dict, user_demand):
         updated_products = []
         added_products = []
         
-        # 首先，更新现有行中已有的产品
         for p, q in rows:
             try:
                 product = p.get()
                 if product in optimized_quantities:
-                    # 获取优化后的数量
+
                     optimized_qty = optimized_quantities[product]
-                    
-                    # 获取当前数量（用户输入）
+
                     current_qty_str = q.get()
                     current_qty = Fraction(current_qty_str) if current_qty_str else Fraction(0)
-                    
-                    # 如果优化后的数量大于当前数量，则更新
+
                     if optimized_qty > current_qty:
                         q.delete(0, tk.END)
                         q.insert(0, str(optimized_qty))
@@ -813,13 +781,10 @@ def show_optimization_result(optimized_quantities, price_dict, user_demand):
             except:
                 pass
         
-        # 然后，添加优化结果中有但用户没有的产品
         for product, qty in optimized_quantities.items():
             if qty > 0:
-                # 调用add_row函数添加新行
-                add_row()  # 这会添加新的一行
-                
-                # 获取最后添加的行并设置产品名称和数量
+                add_row() 
+
                 if rows:
                     last_p, last_q = rows[-1]
                     last_p.set(product)
@@ -1191,19 +1156,15 @@ def auto_adjust_quantity(base, machines, warnings):
     # ===== 首先检查并处理设备限制 =====
     device_warnings = [w for w in warnings if '设备' in w]
     if device_warnings and product in recipes:
-        # 获取当前产品的生产设备
         tool = recipes[product]["tool"]
         oq = recipes[product]["output_qty"]
         usage_per_unit = Fraction(1) / oq
         
-        # 检查是否有当前产品使用的设备的警告
         for warning in device_warnings:
-            # 解析警告信息，获取设备名
             parts = warning.split()
             if len(parts) >= 2:
                 device_name = parts[1]
                 
-                # 如果当前产品使用的设备是警告中的设备
                 if device_name == tool and device_name in limit_entries:
                     try:
                         limit_str = limit_entries[device_name]["var"].get()
@@ -1212,23 +1173,17 @@ def auto_adjust_quantity(base, machines, warnings):
                         else:
                             limit_value = Fraction(0)
                         
-                        # 计算当前设备的总使用率
                         total_device_usage = sum(machines[device_name]) if device_name in machines else Fraction(0)
                         
-                        # 计算其他产品的使用率（总使用率减去当前产品的使用率）
                         current_product_usage = current_qty * usage_per_unit
                         other_products_usage = total_device_usage - current_product_usage
                         
-                        # 计算最大允许的数量
                         max_qty = (limit_value - other_products_usage) / usage_per_unit
                         
-                        # 确保不会为负数
                         if max_qty < 0:
                             max_qty = Fraction(0)
                         
-                        # 如果当前数量超过最大允许数量，直接调整
                         if current_qty > max_qty:
-                            # 直接设置为最大允许数量，不进行逐步调整
                             quantity_entry.delete(0, tk.END)
                             quantity_entry.insert(0, str(max_qty))
                             return True
@@ -1237,7 +1192,6 @@ def auto_adjust_quantity(base, machines, warnings):
                         print(f"调整设备限制时出错 {device_name}: {e}")
     
     # ===== 如果没有设备警告或设备警告已处理，使用原有的逐步调整逻辑 =====
-    # 获取调整状态
     global adjustment_state
     if 'adjustment_state' not in globals():
         adjustment_state = {}
@@ -1260,18 +1214,14 @@ def auto_adjust_quantity(base, machines, warnings):
     
     # 检查调整次数
     if state['adjustment_count'] >= state['max_adjustments']:
-        # 调整次数过多，停止调整
         del adjustment_state[product]
         return False
     
-    # 检查当前是否还有警告
     current_warnings = check_limits_for_qty(product_combobox, state['current_qty'])
     has_current_warnings = len(current_warnings) > 0
     
-    # 根据阶段和警告状态决定如何调整
     if state['phase'] == 'decrease':
         if has_current_warnings:
-            # 还有警告，继续减少
             new_qty = state['current_qty'] - state['decrease_step']
             if new_qty < 0:
                 new_qty = Fraction(0)
@@ -1280,56 +1230,41 @@ def auto_adjust_quantity(base, machines, warnings):
             
             state['current_qty'] = new_qty
         else:
-            # 没有警告了，记录最小值并进入恢复阶段
             state['min_reached'] = True
             state['min_qty'] = state['current_qty']
             state['phase'] = 'recover'
-            # 稍微恢复一点（如果减少过多了）
             if state['current_qty'] < state['original_qty']:
                 new_qty = state['current_qty'] + state['recover_step']
-                # 确保恢复后不会超过原始数量
                 if new_qty > state['original_qty']:
                     new_qty = state['original_qty']
                 state['current_qty'] = new_qty
             else:
-                # 已经调整完成
                 del adjustment_state[product]
                 return False
     
     elif state['phase'] == 'recover':
-        # 恢复阶段：稍微增加一点，但确保不超过原始数量且不超限
         if state['current_qty'] < state['original_qty']:
-            # 尝试增加一点
             test_qty = state['current_qty'] + state['recover_step']
-            
-            # 确保不超过原始数量
             if test_qty > state['original_qty']:
                 test_qty = state['original_qty']
             
-            # 检查增加后是否会超限
             if not will_exceed_limit_with_qty(product_combobox, test_qty):
-                # 可以增加
                 state['current_qty'] = test_qty
             else:
-                # 增加后会超限，停止调整
                 del adjustment_state[product]
                 return False
         else:
-            # 已经恢复到原始数量或更高，停止调整
             del adjustment_state[product]
             return False
     
-    # 更新输入框
     quantity_entry.delete(0, tk.END)
     quantity_entry.insert(0, str(state['current_qty']))
     
-    # 增加调整计数
     state['adjustment_count'] += 1
     
     return True
 def check_limits_for_qty(product_combobox, test_qty):
     """检查给定的产品数量是否会导致超出限制"""
-    # 计算所有行的总消耗（包括测试行）
     base = defaultdict(Fraction)
     machines = defaultdict(list) 
     
@@ -1337,7 +1272,6 @@ def check_limits_for_qty(product_combobox, test_qty):
     if not product:
         return []
     
-    # 计算所有行的消耗，但测试行使用测试数量
     for p, q in rows:
         try:
             prod = p.get()
@@ -1357,14 +1291,12 @@ def check_limits_for_qty(product_combobox, test_qty):
         except: 
             pass
     
-    # 检查是否超出限制
     selected_area = area_var.get()
     if selected_area == "无限制":
         return []
     
     warnings = []
     
-    # 检查材料限制
     for material, amount in base.items():
         if material in limit_entries:
             try:
@@ -1374,7 +1306,6 @@ def check_limits_for_qty(product_combobox, test_qty):
             except (ValueError, KeyError):
                 pass
     
-    # 检查设备限制
     for device, usage_list in machines.items():
         if device in limit_entries:
             try:
@@ -1399,7 +1330,6 @@ def will_exceed_limit_with_qty(product_combobox, test_qty):
     temp_machines = defaultdict(list)
     temp_logistics = {"road_list": []}
     
-    # 只计算这一个产品的消耗
     product = product_combobox.get()
     if not product:
         return False
@@ -1444,11 +1374,11 @@ def will_exceed_limit_with_qty(product_combobox, test_qty):
                 total_usage = sum(usage_list)
                 limit_value = Fraction(limit_entries[device]["var"].get())
                 if total_usage > limit_value:
-                    return True  # 会超限
+                    return True  
             except (ValueError, KeyError):
                 pass
     
-    return False  # 不会超限
+    return False  
 # ===== 刷新 =====
 def refresh():
     canvas.delete("all")
@@ -1534,3 +1464,4 @@ def refresh():
     info_text.insert("end", txt)
 update_limit_display()
 root.mainloop()
+
