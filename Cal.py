@@ -222,6 +222,8 @@ def update_limit_display():
         limit_var = tk.StringVar()
         try:
             limit_value_float = float(limit_value)
+            if abs(limit_value_float*100-int(limit_value_float*100))>0.001:
+                limit_value_float += 0.01
             limit_var.set(str(f"{limit_value_float:.2f}"))
         except:
             limit_var.set("0")
@@ -247,33 +249,88 @@ def update_limit_display():
                     last_limit_values[item] = 0
         
         def on_limit_focus_out(event, item=item_name):
-    # 检查新的限制值是否会导致已有消耗超过限制
+            # 检查新的限制值是否会导致已有消耗超过限制
             if item in limit_entries:
                 entry_widget = limit_entries[item]["entry"]
                 try:
-                    new_value = float(entry_widget.get()) if entry_widget.get() else 0
-                    old_value = last_limit_values.get(item, 0)
+                    # 获取用户输入
+                    input_str = entry_widget.get()
+                    if input_str:
+                        # 尝试解析为Fraction（支持分数和小数）
+                        try:
+                            new_value = Fraction(input_str)
+                        except:
+                            # 如果Fraction解析失败，尝试float
+                            new_value = Fraction(float(input_str))
+                    else:
+                        new_value = Fraction(0)
+                    
+                    # 转换为float用于检查
+                    float_value = float(new_value)
+                    
+                    # 检查第二位小数是否非0
+                    # 计算到小数点后两位的值
+                    value_rounded = round(float_value, 2)
+                    
+                    # 提取第二位小数
+                    second_decimal = int(value_rounded * 100) % 10
+                    
+                    # 如果第二位小数非0且原值不是整数（避免2.0的情况）
+                    if second_decimal != 0 and abs(value_rounded - round(float_value)) > 0.0001:
+                        # 加上0.01
+                        float_value += 0.01
+                        # 更新Fraction值
+                        new_value = Fraction(float_value).limit_denominator(1000)
+                    
+                    # 获取项目类型
+                    item_type = limit_entries[item]["type"]
                     
                     # 计算当前消耗
                     current_consumption = get_current_consumption(item)
                     
-                    if new_value < current_consumption:
-                        # 弹出警告并恢复原值
-                        entry_widget.delete(0, tk.END)
-                        entry_widget.insert(0, str(old_value))
-                        tk.messagebox.showwarning(
-                            "限制警告",
-                            f"警告：当前{item}的消耗为{current_consumption:.2f}，大于您输入的限制值{new_value:.2f}。\n限制值已恢复为{old_value}。"
-                        )
+                    # 将调整后的值显示为两位小数
+                    entry_widget.delete(0, tk.END)
+                    entry_widget.insert(0, f"{float_value:.2f}")
+                    
+                    # 对于设备，需要特殊处理：比较使用率与限制
+                    if item_type == "设备":
+                        # 对于设备，current_consumption是使用率
+                        if current_consumption > new_value:
+                            # 弹出警告
+                            old_value = last_limit_values.get(item, Fraction(0))
+                            entry_widget.delete(0, tk.END)
+                            entry_widget.insert(0, f"{float(old_value):.2f}")
+                            tk.messagebox.showwarning(
+                                "限制警告",
+                                f"警告：当前{item}的使用率为{float(current_consumption):.2f}，大于您输入的限制值{float(new_value):.2f}。\n限制值已恢复为{float(old_value):.2f}。"
+                            )
+                        else:
+                            # 更新上一次的值
+                            last_limit_values[item] = new_value
+                            # 重置调整状态
+                            reset_adjustment_state()
                     else:
-                        # 更新上一次的值
-                        last_limit_values[item] = new_value
-                        # 重置调整状态
-                        reset_adjustment_state()
+                        # 对于材料，使用原有逻辑
+                        old_value = last_limit_values.get(item, Fraction(0))
+                        
+                        if new_value < current_consumption:
+                            # 弹出警告并恢复原值
+                            entry_widget.delete(0, tk.END)
+                            entry_widget.insert(0, f"{float(old_value):.2f}")
+                            tk.messagebox.showwarning(
+                                "限制警告",
+                                f"警告：当前{item}的消耗为{float(current_consumption):.2f}，大于您输入的限制值{float(new_value):.2f}。\n限制值已恢复为{float(old_value):.2f}。"
+                            )
+                        else:
+                            # 更新上一次的值
+                            last_limit_values[item] = new_value
+                            # 重置调整状态
+                            reset_adjustment_state()
                 except ValueError:
                     # 如果输入的不是数字，恢复原值
                     entry_widget.delete(0, tk.END)
-                    entry_widget.insert(0, str(last_limit_values.get(item, 0)))
+                    old_val = last_limit_values.get(item, Fraction(0))
+                    entry_widget.insert(0, f"{float(old_val):.2f}")
         limit_entry.bind("<FocusIn>", on_limit_focus_in)
         limit_entry.bind("<FocusOut>", on_limit_focus_out)
         
@@ -462,19 +519,25 @@ def auto_optimize_calculation():
             except:
                 pass
         
-        # ===== 读取限制（关键修改点）=====
+        # ===== 读取限制并计算可用资源 =====
         current_limits = {}
         for item_name, entry_info in limit_entries.items():
             try:
-                limit_value = Fraction(entry_info["var"].get())
-                if limit_value > 0:
-                    # ⭐ 直接使用总上限，不再减当前消耗
-                    current_limits[item_name] = limit_value
+                total_limit = Fraction(entry_info["var"].get())
+                if total_limit > 0:
+                    # 获取当前用户需求的消耗
+                    user_consumption = get_current_consumption(item_name)
+                    # 可用资源 = 总限制 - 用户已有消耗
+                    available_resource = total_limit - user_consumption
+                    if available_resource > 0:
+                        current_limits[item_name] = available_resource
+                    else:
+                        current_limits[item_name] = Fraction(0)
             except:
                 pass
         
         if not current_limits:
-            tk.messagebox.showinfo("提示", "当前地区没有设置限制")
+            tk.messagebox.showinfo("提示", "当前地区没有可用的剩余资源")
             return
         
         # ===== 可销售产品 =====
@@ -491,7 +554,7 @@ def auto_optimize_calculation():
             sellable_products,
             price_dict,
             user_demand,
-            current_limits,   # ⭐ 传总上限
+            current_limits,   # 传可用资源，而不是总限制
             {}                # current_usage 不再需要
         )
         
@@ -1022,29 +1085,21 @@ def calc_footprint(base, machines, logistics):
 
 # ===== 获取当前消耗 =====
 def get_current_consumption(item_name):
-    """获取指定项目的当前消耗"""
-    # 计算当前消耗
+    """获取指定项目的当前消耗（从所有行计算）"""
+    # 计算当前所有行的消耗
     base = defaultdict(Fraction)
     machines = defaultdict(list) 
-    logistics = {"road_list": []}
-    valid = []
     
     for p, q in rows:
         try:
             prod = p.get()
             qty_str = q.get()
-            if qty_str:
+            if prod and qty_str:
                 qty = Fraction(qty_str)
-            else:
-                qty = Fraction(0)
-            if prod and qty > 0:
-                valid.append((prod, qty))
+                if qty > 0:
+                    _calculate_consumption(prod, qty, base, machines)
         except: 
             pass
-    
-    # 计算当前消耗
-    for prod, qty in valid:
-        _calculate_consumption(prod, qty, base, machines)
     
     # 检查是材料还是设备
     if item_name in base:
@@ -1052,7 +1107,7 @@ def get_current_consumption(item_name):
     elif item_name in machines:
         return Fraction(sum(machines[item_name]))
     
-    return 0
+    return Fraction(0)
 
 def _calculate_consumption(prod, qty, base, machines):
     """递归计算消耗"""
@@ -1095,7 +1150,7 @@ def check_limits(base, machines):
                 total_usage = sum(usage_list)
                 limit_value = Fraction(limit_entries[device]["var"].get())
                 if total_usage > limit_value:
-                    warnings.append(f"设备 {device} 超出限制: {Fraction(total_usage)} > {limit_value}")
+                    warnings.append(f"设备 {device} 超出限制: 使用率 {Fraction(total_usage)} > {limit_value}")
             except (ValueError, KeyError):
                 pass
     
@@ -1133,6 +1188,55 @@ def auto_adjust_quantity(base, machines, warnings):
     if not product:
         return False
     
+    # ===== 首先检查并处理设备限制 =====
+    device_warnings = [w for w in warnings if '设备' in w]
+    if device_warnings and product in recipes:
+        # 获取当前产品的生产设备
+        tool = recipes[product]["tool"]
+        oq = recipes[product]["output_qty"]
+        usage_per_unit = Fraction(1) / oq
+        
+        # 检查是否有当前产品使用的设备的警告
+        for warning in device_warnings:
+            # 解析警告信息，获取设备名
+            parts = warning.split()
+            if len(parts) >= 2:
+                device_name = parts[1]
+                
+                # 如果当前产品使用的设备是警告中的设备
+                if device_name == tool and device_name in limit_entries:
+                    try:
+                        limit_str = limit_entries[device_name]["var"].get()
+                        if limit_str:
+                            limit_value = Fraction(limit_str).limit_denominator(1000)
+                        else:
+                            limit_value = Fraction(0)
+                        
+                        # 计算当前设备的总使用率
+                        total_device_usage = sum(machines[device_name]) if device_name in machines else Fraction(0)
+                        
+                        # 计算其他产品的使用率（总使用率减去当前产品的使用率）
+                        current_product_usage = current_qty * usage_per_unit
+                        other_products_usage = total_device_usage - current_product_usage
+                        
+                        # 计算最大允许的数量
+                        max_qty = (limit_value - other_products_usage) / usage_per_unit
+                        
+                        # 确保不会为负数
+                        if max_qty < 0:
+                            max_qty = Fraction(0)
+                        
+                        # 如果当前数量超过最大允许数量，直接调整
+                        if current_qty > max_qty:
+                            # 直接设置为最大允许数量，不进行逐步调整
+                            quantity_entry.delete(0, tk.END)
+                            quantity_entry.insert(0, str(max_qty))
+                            return True
+                        
+                    except Exception as e:
+                        print(f"调整设备限制时出错 {device_name}: {e}")
+    
+    # ===== 如果没有设备警告或设备警告已处理，使用原有的逐步调整逻辑 =====
     # 获取调整状态
     global adjustment_state
     if 'adjustment_state' not in globals():
@@ -1225,33 +1329,33 @@ def auto_adjust_quantity(base, machines, warnings):
     return True
 def check_limits_for_qty(product_combobox, test_qty):
     """检查给定的产品数量是否会导致超出限制"""
-    # 创建一个临时的副本进行计算
-    temp_base = defaultdict(Fraction)
-    temp_machines = defaultdict(list)
-    temp_logistics = {"road_list": []}
+    # 计算所有行的总消耗（包括测试行）
+    base = defaultdict(Fraction)
+    machines = defaultdict(list) 
     
-    # 只计算这一个产品的消耗
     product = product_combobox.get()
     if not product:
         return []
     
-    # 递归计算消耗
-    def _temp_calculate(prod, qty, base, machines):
-        if prod not in recipes:
-            base[prod] += qty
-            return
-
-        tool = recipes[prod]["tool"]
-        oq = recipes[prod]["output_qty"]
-        machines[tool].append(qty / oq)
-        
-        inputs = list(recipes[prod]["inputs"].items())
-        for mat, need in inputs:
-            total = need * qty
-            _temp_calculate(mat, total, base, machines)
-    
-    # 计算测试数量的消耗
-    _temp_calculate(product, test_qty, temp_base, temp_machines)
+    # 计算所有行的消耗，但测试行使用测试数量
+    for p, q in rows:
+        try:
+            prod = p.get()
+            qty_str = q.get()
+            
+            if prod:
+                # 如果是测试的产品，使用测试数量
+                if p == product_combobox:
+                    qty = test_qty
+                elif qty_str:
+                    qty = Fraction(qty_str)
+                else:
+                    qty = Fraction(0)
+                
+                if qty > 0:
+                    _calculate_consumption(prod, qty, base, machines)
+        except: 
+            pass
     
     # 检查是否超出限制
     selected_area = area_var.get()
@@ -1261,7 +1365,7 @@ def check_limits_for_qty(product_combobox, test_qty):
     warnings = []
     
     # 检查材料限制
-    for material, amount in temp_base.items():
+    for material, amount in base.items():
         if material in limit_entries:
             try:
                 limit_value = Fraction(limit_entries[material]["var"].get())
@@ -1271,7 +1375,7 @@ def check_limits_for_qty(product_combobox, test_qty):
                 pass
     
     # 检查设备限制
-    for device, usage_list in temp_machines.items():
+    for device, usage_list in machines.items():
         if device in limit_entries:
             try:
                 total_usage = sum(usage_list)
